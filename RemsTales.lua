@@ -173,43 +173,86 @@ local function total_counts()
     return totals, physical
 end
 
-local function inventory_can_receive(chapter)
+local function inventory_capacity()
     local inventory = windower.ffxi.get_items(inventory_id)
     if type(inventory) ~= 'table' then
-        return false
+        return 0, 0, 0
     end
 
-    local item_id = item_for_chapter(chapter)
-    local stack_size = (res.items[item_id] and tonumber(res.items[item_id].stack)) or 99
+    local stack_mask = 0
+    for chapter = 1, CHAPTER_COUNT do
+        local item_id = item_for_chapter(chapter)
+        local stack_size = (res.items[item_id] and tonumber(res.items[item_id].stack)) or 99
+        local has_partial_stack = false
 
-    for _, item in pairs(inventory) do
-        if type(item) == 'table' and tonumber(item.id) == item_id then
-            local count = tonumber(item.count) or 0
-            if count < stack_size then
-                return true
+        for _, item in pairs(inventory) do
+            if type(item) == 'table' and tonumber(item.id) == item_id then
+                local count = tonumber(item.count) or 0
+                if count < stack_size then
+                    has_partial_stack = true
+                    break
+                end
             end
+        end
+
+        if has_partial_stack then
+            stack_mask = stack_mask + 2 ^ (chapter - 1)
         end
     end
 
     local maximum = tonumber(inventory.max) or 0
     local used = tonumber(inventory.count) or 0
-    return maximum > used
-end
+    local free_slots = math.max(0, maximum - used)
+    local eligible_mask = stack_mask
 
-local function eligibility_mask()
-    local mask = 0
-    for chapter = 1, CHAPTER_COUNT do
-        if inventory_can_receive(chapter) then
-            mask = mask + 2 ^ (chapter - 1)
-        end
+    if free_slots > 0 then
+        eligible_mask = 2 ^ CHAPTER_COUNT - 1
     end
-    return mask
+
+    return free_slots, stack_mask, eligible_mask
 end
 
 local function mask_has(mask, chapter)
     mask = tonumber(mask) or 0
     local divisor = 2 ^ (chapter - 1)
     return math.floor(mask / divisor) % 2 == 1
+end
+
+local function capacity_can_receive(capacity, chapter)
+    if not capacity then return false end
+    if mask_has(capacity.stack_mask, chapter) then return true end
+    if (capacity.reserved[chapter] or 0) > 0 then return true end
+    return (capacity.free_slots or 0) > 0
+end
+
+local function reserve_capacity(capacity, chapter)
+    if not capacity_can_receive(capacity, chapter) then
+        return false
+    end
+
+    if not mask_has(capacity.stack_mask, chapter) and
+       (capacity.reserved[chapter] or 0) == 0 then
+        capacity.free_slots = math.max(0, (capacity.free_slots or 0) - 1)
+        capacity.new_slot_open[chapter] = true
+    end
+
+    capacity.reserved[chapter] = (capacity.reserved[chapter] or 0) + 1
+    return true
+end
+
+local function release_capacity(capacity, chapter)
+    if not capacity then return end
+
+    local reserved = capacity.reserved[chapter] or 0
+    if reserved > 0 then
+        reserved = reserved - 1
+        capacity.reserved[chapter] = reserved
+    end
+
+    if reserved == 0 and capacity.new_slot_open[chapter] then
+        capacity.new_slot_open[chapter] = nil
+        capacity.free_slots = (capacity.free_slots or 0) + 1
+    end
 end
 
 local function current_pool_entries()
@@ -296,12 +339,15 @@ end
 local function state_for_local()
     local totals = total_counts()
     local fresh = currency_is_fresh()
+    local free_slots, stack_mask, eligible_mask = inventory_capacity()
     return {
         name = player_name(),
         zone = current_zone(),
         mode = local_mode(),
         valid = fresh,
-        eligible_mask = fresh and eligibility_mask() or 0,
+        eligible_mask = fresh and eligible_mask or 0,
+        free_slots = free_slots,
+        stack_mask = stack_mask,
         totals = totals,
     }
 end
@@ -313,6 +359,8 @@ local function handle_state(args)
     local mode = args[6]
     local valid = tonumber(args[7]) == 1
     local mask = tonumber(args[8]) or 0
+    local free_slots = tonumber(args[9]) or 0
+    local stack_mask = tonumber(args[10]) or 0
 
     if not cycle or cycle.signature ~= signature or not name or not zone then
         return
@@ -326,7 +374,7 @@ local function handle_state(args)
 
     local totals = {}
     for chapter = 1, CHAPTER_COUNT do
-        totals[chapter] = tonumber(args[8 + chapter]) or 0
+        totals[chapter] = tonumber(args[10 + chapter]) or 0
     end
 
     cycle.states[name:lower()] = {
@@ -335,6 +383,8 @@ local function handle_state(args)
         mode = mode,
         valid = valid,
         eligible_mask = mask,
+        free_slots = math.max(0, free_slots),
+        stack_mask = stack_mask,
         totals = totals,
         received_at = now(),
     }
@@ -355,6 +405,8 @@ local function send_local_state()
         state.mode,
         state.valid and '1' or '0',
         tostring(state.eligible_mask),
+        tostring(state.free_slots or 0),
+        tostring(state.stack_mask or 0),
     }
 
     for chapter = 1, CHAPTER_COUNT do
@@ -383,6 +435,7 @@ local function activate_cycle(entries, signature, announce)
         dry_run = false,
         candidate_states = nil,
         virtual = nil,
+        capacity = nil,
     }
 
     send_local_state()
@@ -411,7 +464,7 @@ local function start_cycle()
         return
     end
 
-    request_currency(false)
+    request_currency(not currency_is_fresh())
     activate_cycle(entries, signature, true)
     verbose(string.format('Collecting local client state for %d Rem\'s Tale drop%s.', #entries, #entries == 1 and '' or 's'))
 end
@@ -453,11 +506,14 @@ local function copy_totals(source)
     return result
 end
 
-local function rank_candidates(chapter, candidate_states, virtual, seed, excluded)
+local function rank_candidates(chapter, candidate_states, virtual, capacity, seed, excluded)
     local ranked = {}
 
     for name_key, state in pairs(candidate_states or {}) do
-        if state.valid and mask_has(state.eligible_mask, chapter) and not (excluded and excluded[name_key]) then
+        if state.valid and
+           mask_has(state.eligible_mask, chapter) and
+           capacity_can_receive(capacity[name_key], chapter) and
+           not (excluded and excluded[name_key]) then
             ranked[#ranked + 1] = {
                 key = name_key,
                 name = state.name,
@@ -629,10 +685,18 @@ local function finalize_cycle()
     end
 
     local virtual = {}
+    local capacity = {}
     for key, state in pairs(candidate_states) do
         virtual[key] = copy_totals(state.totals)
+        capacity[key] = {
+            free_slots = tonumber(state.free_slots) or 0,
+            stack_mask = tonumber(state.stack_mask) or 0,
+            reserved = {},
+            new_slot_open = {},
+        }
     end
     cycle.virtual = virtual
+    cycle.capacity = capacity
 
     if dry_run then
         chat('Observe-only pool: computing assignments without lotting.')
@@ -641,7 +705,7 @@ local function finalize_cycle()
     for _, entry in ipairs(entries) do
         if not handled_drop_keys[entry.drop_key] then
             local seed = cycle.signature .. '|' .. entry.drop_key
-            local ranked = rank_candidates(entry.chapter, candidate_states, virtual, seed, nil)
+            local ranked = rank_candidates(entry.chapter, candidate_states, virtual, capacity, seed, nil)
 
             if #ranked == 0 then
                 chat(string.format('No eligible client can receive Rem\'s Tale Ch.%d in slot %d; leaving it untouched.',
@@ -663,6 +727,7 @@ local function finalize_cycle()
                 }
 
                 virtual[winner.key][entry.chapter] = virtual[winner.key][entry.chapter] + 1
+                reserve_capacity(capacity[winner.key], entry.chapter)
                 handled_drop_keys[entry.drop_key] = true
 
                 if not dry_run then
@@ -691,7 +756,7 @@ local function reassign(assignment, reason)
 
     local active_cycle = cycle
     if not active_cycle or active_cycle.signature ~= assignment.signature or
-       not active_cycle.candidate_states or not active_cycle.virtual then
+       not active_cycle.candidate_states or not active_cycle.virtual or not active_cycle.capacity then
         chat(string.format('Could not safely reassign Rem\'s Tale Ch.%d slot %d after %s; leaving it untouched.',
             assignment.chapter, assignment.slot, reason or 'failure'), 167)
         leader_assignments[assignment.slot] = nil
@@ -702,6 +767,7 @@ local function reassign(assignment, reason)
         active_cycle.virtual[assignment.winner_key][assignment.chapter] =
             math.max(0, active_cycle.virtual[assignment.winner_key][assignment.chapter] - 1)
         assignment.tried[assignment.winner_key] = true
+        release_capacity(active_cycle.capacity[assignment.winner_key], assignment.chapter)
     end
 
     local seed = assignment.signature .. '|' .. assignment.drop_key .. '|fallback'
@@ -709,6 +775,7 @@ local function reassign(assignment, reason)
         assignment.chapter,
         active_cycle.candidate_states,
         active_cycle.virtual,
+        active_cycle.capacity,
         seed,
         assignment.tried)
 
@@ -727,6 +794,7 @@ local function reassign(assignment, reason)
     assignment.deadline = now() + ASSIGNMENT_TIMEOUT_SECONDS
     active_cycle.virtual[winner.key][assignment.chapter] =
         active_cycle.virtual[winner.key][assignment.chapter] + 1
+    reserve_capacity(active_cycle.capacity[winner.key], assignment.chapter)
 
     chat(string.format('Reassigning Rem\'s Tale Ch.%d slot %d -> %s after %s.',
         assignment.chapter, assignment.slot, assignment.winner, reason or 'failure'), 167)
@@ -746,7 +814,16 @@ local function handle_assignment(args)
     if not signature or not drop_key or not slot or not chapter or not winner or not me then
         return
     end
+
+    -- All clients remember assigned drop keys so a later pool cycle cannot
+    -- accidentally allocate the same page again if additional loot arrives.
+    handled_drop_keys[drop_key] = true
+
     if winner:lower() ~= me:lower() then
+        return
+    end
+
+    if local_pending_lots[drop_key] then
         return
     end
 
@@ -1011,7 +1088,6 @@ windower.register_event('incoming chunk', function(id, data)
         if not ok or not packet then return end
 
         if chapter_for_item(packet.Item) then
-            request_currency(false)
             schedule_pool_check(POOL_DEBOUNCE_SECONDS)
         end
         return
