@@ -91,39 +91,39 @@ Capacity is reserved while multiple pages in the same pool are allocated, so a c
 ## Commands
 
 ```text
-//rt status
-//rt totals
-//rt peers
-//rt on
-//rt off
-//rt observe
-//rt observe on
-//rt observe off
-//rt refresh
-//rt verbose
-//rt verbose on
-//rt verbose off
+//rems status
+//rems totals
+//rems peers
+//rems on
+//rems off
+//rems observe
+//rems observe on
+//rems observe off
+//rems refresh
+//rems verbose
+//rems verbose on
+//rems verbose off
 ```
 
-### `//rt status`
+### `//rems status`
 
 Shows local mode, Monisette snapshot freshness, current pool state, peer count, and coordinator.
 
-### `//rt totals`
+### `//rems totals`
 
 Shows this character's physical, stored, and combined counts for chapters 1-10.
 
-### `//rt peers`
+### `//rems peers`
 
 Shows the peer totals collected for the current/most recent pool cycle.
 
-### `//rt on` / `//rt off`
+### `//rems on` / `//rems off`
 
 Enables or disables this client as an allocation participant.
 
 The default is **enabled**.
 
-### `//rt observe [on|off]`
+### `//rems observe [on|off]`
 
 Observe mode participates in coordination and computes assignments but does not lot.
 
@@ -131,11 +131,11 @@ If every participating client is in observe mode, the entire pool becomes a dry 
 
 If any valid auto-lot clients are present, observe-only clients are not selected as winners.
 
-### `//rt refresh`
+### `//rems refresh`
 
 Requests a fresh Monisette/Currencies I snapshot.
 
-### `//rt verbose [on|off]`
+### `//rems verbose [on|off]`
 
 Enables additional coordination diagnostics.
 
@@ -160,20 +160,20 @@ For automatic startup, add the load command to the appropriate Windower init con
 Load RemsTales on every participating client and put all of them into observe mode:
 
 ```text
-//rt observe on
+//rems observe on
 ```
 
 Then run an HTMB that drops Rem's Tales and confirm that the logged assignment matches:
 
 ```text
-//rt totals
-//rt peers
+//rems totals
+//rems peers
 ```
 
 Once the totals and assignments look correct:
 
 ```text
-//rt observe off
+//rems observe off
 ```
 
 ## Coexistence with Treasury / other auto-lot addons
@@ -181,6 +181,10 @@ Once the totals and assignments look correct:
 Do not configure another addon to automatically lot the same Rem's Tale pages.
 
 RemsTales intentionally leaves non-winning clients alone instead of auto-passing. Another addon that independently lots Rem's Tales can defeat the single-winner coordination model.
+
+## Version 0.1.1
+
+- Replace the short command alias `//rt` with `//rems` to avoid colliding with RollTracker.
 
 ## Version 0.1.0
 
