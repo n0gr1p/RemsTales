@@ -13,11 +13,11 @@ local REM_LAST_ID = 4073
 local CHAPTER_COUNT = 10
 
 local POOL_DEBOUNCE_SECONDS = 0.30
-local STATE_COLLECTION_SECONDS = 0.90
-local STATE_REFRESH_SECONDS = 0.30
-local LOT_RETRY_SECONDS = 0.70
-local LOT_FAIL_SECONDS = 1.60
-local ASSIGNMENT_TIMEOUT_SECONDS = 2.50
+local STATE_COLLECTION_SECONDS = 1.50
+local STATE_REFRESH_SECONDS = 0.40
+local LOT_RETRY_SECONDS = 0.80
+local LOT_FAIL_SECONDS = 3.00
+local ASSIGNMENT_TIMEOUT_SECONDS = 4.00
 local CURRENCY_MAX_AGE_SECONDS = 300
 local CURRENCY_REQUEST_MIN_INTERVAL = 2.0
 local TICK_SECONDS = 0.05
@@ -1032,10 +1032,11 @@ local function show_peers()
         for chapter = 1, CHAPTER_COUNT do
             parts[#parts + 1] = string.format('%d:%d', chapter, state.totals[chapter] or 0)
         end
-        chat(string.format('%s [%s%s] %s',
+        chat(string.format('%s [%s%s,free=%d] %s',
             state.name,
             state.mode,
             state.valid and '' or ',stale',
+            state.free_slots or 0,
             table.concat(parts, ' ')))
     end
 end
