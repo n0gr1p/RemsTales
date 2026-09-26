@@ -1,7 +1,7 @@
 _addon.name = 'RemsTales'
 _addon.author = 'n0gr1p + OpenAI'
-_addon.version = '0.1.0'
-_addon.commands = {'remstales', 'rt'}
+_addon.version = '0.1.1'
+_addon.commands = {'remstales', 'rems'}
 
 local packets = require('packets')
 local res = require('resources')
@@ -1042,13 +1042,13 @@ local function show_peers()
 end
 
 local function show_help()
-    chat('//rt status - show mode, Monisette freshness, and current pool state.')
-    chat('//rt totals - show physical + Monisette counts for chapters 1-10.')
-    chat('//rt peers - show the most recent local-client totals used for allocation.')
-    chat('//rt on | off - enable or disable participation on this client.')
-    chat('//rt observe [on|off] - compute/log assignments but do not lot on this client.')
-    chat('//rt refresh - request a fresh Currencies I / Monisette snapshot.')
-    chat('//rt verbose [on|off] - toggle coordination diagnostics.')
+    chat('//rems status - show mode, Monisette freshness, and current pool state.')
+    chat('//rems totals - show physical + Monisette counts for chapters 1-10.')
+    chat('//rems peers - show the most recent local-client totals used for allocation.')
+    chat('//rems on | off - enable or disable participation on this client.')
+    chat('//rems observe [on|off] - compute/log assignments but do not lot on this client.')
+    chat('//rems refresh - request a fresh Currencies I / Monisette snapshot.')
+    chat('//rems verbose [on|off] - toggle coordination diagnostics.')
 end
 
 windower.register_event('incoming chunk', function(id, data)
